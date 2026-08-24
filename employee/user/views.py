@@ -58,7 +58,7 @@ def login(request):
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
+# access token ko copy karo or profile api me authorization me Bearer Token field me daalo
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def profile(request):
