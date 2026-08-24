@@ -23,7 +23,7 @@ def register(request):
         return Response(
             {
                 "message": "Employee registered successfully",
-                "employee": {"name": employee.name, "email": employee.email}
+                "employee": {"name": employee.name, "email": employee.email, "phone": employee.phone}
             },
             status=status.HTTP_201_CREATED
         )
@@ -46,6 +46,7 @@ def login(request):
                     "message": "Login successful",
                     "name": employee.name,
                     "email": employee.email,
+                    "phone": employee.phone,
                     "access": str(refresh.access_token),
                     "refresh": str(refresh)
                 },

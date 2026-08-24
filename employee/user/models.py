@@ -30,8 +30,6 @@ class Employee(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(
         max_length=12,
         validators=[RegexValidator(regex=r'^\d{12}$', message="Phone number must be exactly 12 digits.")],
-        blank=True,
-        null=True
     )
     department = models.CharField(max_length=100, blank=True, null=True)
     designation = models.CharField(max_length=100, blank=True, null=True)
