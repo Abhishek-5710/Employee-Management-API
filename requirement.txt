@@ -1,5 +1,5 @@
 django
 djangorestframework
-psycopg2-binary
+psycopg2-binary #postgre database 
 python-dotenv
 djangorestframework-simplejwt
