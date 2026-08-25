@@ -1,6 +1,9 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.core.validators import RegexValidator
+import random
+from django.utils import timezone
+from datetime import timedelta
 
 
 # Ye class sirf ek kaam karti hai: employee banate waqt password ko hash (secure) karna
@@ -29,12 +32,15 @@ class Employee(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     phone = models.CharField(
         max_length=12,
+        unique=True,
         validators=[RegexValidator(regex=r'^\d{12}$', message="Phone number must be exactly 12 digits.")],
     )
     department = models.CharField(max_length=100, blank=True, null=True)
     designation = models.CharField(max_length=100, blank=True, null=True)
     salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     joining_date = models.DateField(blank=True, null=True)
+    failed_login_attempts = models.PositiveIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)   # admin panel access ke liye zaroori
@@ -47,3 +53,16 @@ class Employee(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.name
+
+class EmailOTP(models.Model):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_verified = models.BooleanField(default=False)
+
+    def is_expired(self):
+        return timezone.now() > self.created_at + timedelta(minutes=5)
+
+    @staticmethod
+    def generate_otp():
+        return str(random.randint(100000, 999999))
