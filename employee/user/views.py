@@ -47,6 +47,7 @@ def login(request):
                     "name": employee.name,
                     "email": employee.email,
                     "phone": employee.phone,
+                    "password": employee.password,
                     "access": str(refresh.access_token),
                     "refresh": str(refresh)
                 },
