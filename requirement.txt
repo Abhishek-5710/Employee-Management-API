@@ -3,3 +3,9 @@ djangorestframework
 psycopg2-binary #postgre database 
 python-dotenv
 djangorestframework-simplejwt
+celery
+redis
+django-cors-headers
+Pillow
+drf-spectacular #documentation of api
+django-celery-beat
