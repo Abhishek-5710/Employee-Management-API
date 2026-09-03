@@ -265,62 +265,125 @@ def upload_profile_picture(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def punch(request):
+def punch(request, punch_type):
+
     employee = request.user
-    today = timezone.now().date()
+    today = timezone.localtime(timezone.now()).date()
 
-    attendance = Attendance.objects.filter(employee=employee, date=today).first()
+    attendance = Attendance.objects.filter(
+        employee=employee,
+        date=today
+    ).first()
 
-    # Agar aaj ka record nahi hai, ya hai but punch_out ho chuka hai -> naya PUNCH IN
-    if not attendance or attendance.punch_out is not None:
-        if attendance and attendance.punch_out is not None:
-            return Response({"message": "You have already completed today's attendance"}, status=status.HTTP_400_BAD_REQUEST)
+    if punch_type == "in":
 
-        Attendance.objects.create(employee=employee, date=today, punch_in=timezone.now())
-        return Response({"message": "Punched in successfully", "status": "punched_in"}, status=status.HTTP_201_CREATED)
+        # Already punched in today
+        if attendance:
+            return Response(
+                {
+                    "message": "You have already punched in today"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    # Agar attendance hai, punch_out abhi khali hai -> PUNCH OUT karo
-
-    # Check karo koi break abhi "open" hai (break_out None hai)
-    if len(attendance.break_in) > len(attendance.break_out):
-       return Response(
-        {"message": "You must break out before punching out"},
-        status=status.HTTP_400_BAD_REQUEST
-    )
-
-    attendance.punch_out = timezone.now()
-
-    total_timing = attendance.punch_out - attendance.punch_in
-
-    for i in range(len(attendance.break_in)):
-      if i < len(attendance.break_out):
-
-        break_in_dt = datetime.fromisoformat(
-            attendance.break_in[i]
+        attendance = Attendance.objects.create(
+            employee=employee,
+            date=today,
+            punch_in=timezone.now()
         )
 
-        break_out_dt = datetime.fromisoformat(
-            attendance.break_out[i]
+        return Response(
+            {
+                "message": "Punched in successfully",
+                "status": "punched_in"
+            },
+            status=status.HTTP_201_CREATED
         )
 
-        total_timing -= (break_out_dt - break_in_dt)
+    elif punch_type == "out":
 
-    attendance.total_timing = total_timing
-    attendance.save(update_fields=["punch_out", "total_timing"])
+        # Must punch in first
+        if not attendance:
+            return Response(
+                {
+                    "message": "You must punch in first"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    return Response(
-        {
-            "message": "Punched out successfully",
-            "status": "punched_out",
-            "total_timing": str(attendance.total_timing)
-        },
-        status=status.HTTP_200_OK
-    )
+        # Already punched out
+        if attendance.punch_out is not None:
+            return Response(
+                {
+                    "message": "You have already punched out today"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if a break is still open
+        if len(attendance.break_in) > len(attendance.break_out):
+            return Response(
+                {
+                    "message": "You must break out before punching out"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Punch out
+        attendance.punch_out = timezone.now()
+
+        # Calculate total working time
+        total_timing = (
+            attendance.punch_out - attendance.punch_in
+        )
+
+        # Subtract break time
+        for i in range(len(attendance.break_in)):
+
+            if i < len(attendance.break_out):
+
+                break_in_dt = datetime.fromisoformat(
+                    attendance.break_in[i]
+                )
+
+                break_out_dt = datetime.fromisoformat(
+                    attendance.break_out[i]
+                )
+
+                total_timing -= (
+                    break_out_dt - break_in_dt
+                )
+
+        attendance.total_timing = total_timing
+
+        attendance.save(
+            update_fields=[
+                "punch_out",
+                "total_timing"
+            ]
+        )
+
+        return Response(
+            {
+                "message": "Punched out successfully",
+                "status": "punched_out",
+                "total_timing": str(attendance.total_timing)
+            },
+            status=status.HTTP_200_OK
+        )
+    else:
+
+        return Response(
+            {
+                "message": "Invalid punch type. Use in or out"
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def break_toggle(request):
+def break_toggle(request, break_type):
 
     employee = request.user
     today = timezone.now().date()
@@ -345,32 +408,18 @@ def break_toggle(request):
     break_in_list = attendance.break_in
     break_out_list = attendance.break_out
 
-    # Check whether an active break exists
-    if len(break_in_list) > len(break_out_list):
+    # BREAK IN
+    if break_type == "break_in":
 
-        # BREAK OUT
-        break_out_list.append(timezone.now().isoformat())
+        if len(break_in_list) > len(break_out_list):
+            return Response(
+                {"message": "You are already on break"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        attendance.break_out = break_out_list
-
-        attendance.save(
-            update_fields=["break_out"]
+        break_in_list.append(
+            timezone.localtime(timezone.now()).isoformat()
         )
-
-        return Response(
-            {
-                "message": "Break out successfully",
-                "status": "break_out",
-                "break_in": break_in_list,
-                "break_out": break_out_list
-            },
-            status=status.HTTP_200_OK
-        )
-
-    else:
-
-        # BREAK IN
-        break_in_list.append(timezone.now().isoformat())
 
         attendance.break_in = break_in_list
 
@@ -388,6 +437,42 @@ def break_toggle(request):
             status=status.HTTP_201_CREATED
         )
 
+    # BREAK OUT
+    elif break_type == "break_out":
+
+        if len(break_in_list) <= len(break_out_list):
+            return Response(
+                {"message": "You are not currently on break"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        break_out_list.append(
+            timezone.localtime(timezone.now()).isoformat()
+        )
+
+        attendance.break_out = break_out_list
+
+        attendance.save(
+            update_fields=["break_out"]
+        )
+
+        return Response(
+            {
+                "message": "Break out successfully",
+                "status": "break_out",
+                "break_in": break_in_list,
+                "break_out": break_out_list
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # INVALID BREAK TYPE
+    else:
+        return Response(
+            {"message": "Invalid break type. Use break_in or break_out"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
     
 class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AttendanceSerializer

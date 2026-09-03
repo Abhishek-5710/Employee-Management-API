@@ -22,8 +22,8 @@ router.register("employees", EmployeeViewSet)
 router.register("attendance", AttendanceViewSet, basename="attendance")
 
 urlpatterns = [
-    path("attendance/punch/", punch),          # sirf punch in/out
-    path("attendance/break/", break_toggle),
+    path("attendance/punch/<str:punch_type>/", punch),          # sirf punch in/out
+    path("attendance/break/<str:break_type>/", break_toggle),
     path("", include(router.urls)),
     path("register/", register),
     path("login/", login),
