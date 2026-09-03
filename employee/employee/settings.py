@@ -50,6 +50,9 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "django_filters",
+    "corsheaders",
+    "drf_spectacular",
+    "django_celery_beat",
     "user",
 ]
 
@@ -64,7 +67,24 @@ REST_FRAMEWORK = {
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
+
+# CACHES = {
+#     'default': {
+#         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
+#     }
+# }
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",     # agar React use karoge
+    "http://127.0.0.1:3000",
+]
+
+# Celery config
+CELERY_BROKER_URL = "redis://localhost:6379/0"  #Redis ka "database number 0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"  #Redis mein multiple databases ho sakte hain
+
 
 from datetime import timedelta
 SIMPLE_JWT = {
@@ -72,9 +92,16 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
+
+MEDIA_URL = "/media/"  #access using browser http://127.0.0.1:8000/media/profile_pics/photo.jpg
+MEDIA_ROOT = BASE_DIR / "media"
+
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -139,9 +166,19 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "en"
 
-TIME_ZONE = "UTC"
+LANGUAGES = [
+    ("en", "English"),
+    ("hi", "Hindi"),
+    ("gu", "Gujarati"),
+]
+
+LOCALE_PATHS = [
+    BASE_DIR / "local",
+]
+
+TIME_ZONE = "Asia/Kolkata"  # UTC (Universal Time)
 
 USE_I18N = True
 

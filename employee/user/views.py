@@ -8,19 +8,40 @@ from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.core.mail import send_mail
-from .models import Employee
-from .serializers import EmployeeSerializer, RegisterSerializer, LoginSerializer,ChangePasswordSerializer,SendOTPSerializer, VerifyOTPSerializer, ResetPasswordWithOTPSerializer
+from .models import Employee, Attendance, EmailOTP
+from .serializers import EmployeeSerializer, RegisterSerializer, LoginSerializer,ChangePasswordSerializer,SendOTPSerializer, VerifyOTPSerializer, ResetPasswordWithOTPSerializer, AttendanceSerializer
 from django.core.mail import send_mail
-from .models import Employee, EmailOTP
 from django.utils import timezone
 from datetime import timedelta
 from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.throttling import ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from .tasks import send_otp_email
+from rest_framework.parsers import MultiPartParser, FormParser #for profile picture 
 
 token_generator = PasswordResetTokenGenerator()
 from .permissions import IsHR, IsHROrManager, IsSelfOrHR
+from django.utils.translation import gettext as _  #i18n for language
+from .filters import AttendanceFilter
+from .utils import calculate_age_details
+from datetime import datetime
+# from django.core.cache import cache
+
+# @api_view(["GET"])
+# def get_all_employees_cached(request):
+#     cached_data = cache.get("all_employees")   # <- ye actual caching logic hai
+
+#     if cached_data is not None:
+#         return Response(cached_data)
+
+#     employees = Employee.objects.all()
+#     serializer = EmployeeSerializer(employees, many=True)
+#     data = serializer.data
+
+#     cache.set("all_employees", data, timeout=300)   # <- ye actual caching logic hai
+
+#     return Response(data)
 
 class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all()
@@ -53,7 +74,7 @@ def register(request):
         employee = serializer.save()
         return Response(
             {
-                "message": "Employee registered successfully",
+                "message": _("Employee registered successfully"),
                 "employee": {"name": employee.name, "email": employee.email, "phone": employee.phone}
             },
             status=status.HTTP_201_CREATED
@@ -81,7 +102,7 @@ def login(request):
         if employee.locked_until and timezone.now() < employee.locked_until: #check karta hai ki abhi bhi lock period chal raha hai ya khatam ho gaya
             remaining = (employee.locked_until - timezone.now()).seconds // 60
             return Response(
-                {"message": f"Account locked. Try again after {remaining} minutes."},
+                {"message": _(f"Account locked. Try again after {remaining} minutes.")},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -96,7 +117,7 @@ def login(request):
             refresh = RefreshToken.for_user(employee)
             return Response(
                 {
-                    "message": "Login successful",
+                    "message": _("Login successful"),
                     "name": employee.name,
                     "email": employee.email,
                     "access": str(refresh.access_token),
@@ -170,13 +191,8 @@ def send_otp(request):
         otp_code = EmailOTP.generate_otp()
         EmailOTP.objects.create(employee=employee, otp=otp_code)
 
-        send_mail(
-            subject="Your OTP Code",
-            message=f"Your OTP is {otp_code}. It is valid for 5 minutes.",
-            from_email=None,
-            recipient_list=[email],
-        )
-
+        send_otp_email.delay(email, otp_code)
+        
         return Response({"message": "OTP sent to your email"}, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -227,3 +243,204 @@ def reset_password_with_otp(request):
 
         return Response({"message": "Password reset successful"}, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_profile_picture(request):
+    employee = request.user
+    if "profile_picture" not in request.FILES:   # "profile_picture" key of uploading image
+        return Response({"message": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+
+    employee.profile_picture = request.FILES["profile_picture"]
+    employee.save()
+
+    return Response(
+        {
+            "message": "Profile picture uploaded successfully",
+            "url": request.build_absolute_uri(employee.profile_picture.url)
+        },
+        status=status.HTTP_200_OK
+    )
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def punch(request):
+    employee = request.user
+    today = timezone.now().date()
+
+    attendance = Attendance.objects.filter(employee=employee, date=today).first()
+
+    # Agar aaj ka record nahi hai, ya hai but punch_out ho chuka hai -> naya PUNCH IN
+    if not attendance or attendance.punch_out is not None:
+        if attendance and attendance.punch_out is not None:
+            return Response({"message": "You have already completed today's attendance"}, status=status.HTTP_400_BAD_REQUEST)
+
+        Attendance.objects.create(employee=employee, date=today, punch_in=timezone.now())
+        return Response({"message": "Punched in successfully", "status": "punched_in"}, status=status.HTTP_201_CREATED)
+
+    # Agar attendance hai, punch_out abhi khali hai -> PUNCH OUT karo
+
+    # Check karo koi break abhi "open" hai (break_out None hai)
+    if len(attendance.break_in) > len(attendance.break_out):
+       return Response(
+        {"message": "You must break out before punching out"},
+        status=status.HTTP_400_BAD_REQUEST
+    )
+
+    attendance.punch_out = timezone.now()
+
+    total_timing = attendance.punch_out - attendance.punch_in
+
+    for i in range(len(attendance.break_in)):
+      if i < len(attendance.break_out):
+
+        break_in_dt = datetime.fromisoformat(
+            attendance.break_in[i]
+        )
+
+        break_out_dt = datetime.fromisoformat(
+            attendance.break_out[i]
+        )
+
+        total_timing -= (break_out_dt - break_in_dt)
+
+    attendance.total_timing = total_timing
+    attendance.save(update_fields=["punch_out", "total_timing"])
+
+    return Response(
+        {
+            "message": "Punched out successfully",
+            "status": "punched_out",
+            "total_timing": str(attendance.total_timing)
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def break_toggle(request):
+
+    employee = request.user
+    today = timezone.now().date()
+
+    attendance = Attendance.objects.filter(
+        employee=employee,
+        date=today
+    ).first()
+
+    if not attendance:
+        return Response(
+            {"message": "You must punch in first"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if attendance.punch_out is not None:
+        return Response(
+            {"message": "You have already punched out today"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    break_in_list = attendance.break_in
+    break_out_list = attendance.break_out
+
+    # Check whether an active break exists
+    if len(break_in_list) > len(break_out_list):
+
+        # BREAK OUT
+        break_out_list.append(timezone.now().isoformat())
+
+        attendance.break_out = break_out_list
+
+        attendance.save(
+            update_fields=["break_out"]
+        )
+
+        return Response(
+            {
+                "message": "Break out successfully",
+                "status": "break_out",
+                "break_in": break_in_list,
+                "break_out": break_out_list
+            },
+            status=status.HTTP_200_OK
+        )
+
+    else:
+
+        # BREAK IN
+        break_in_list.append(timezone.now().isoformat())
+
+        attendance.break_in = break_in_list
+
+        attendance.save(
+            update_fields=["break_in"]
+        )
+
+        return Response(
+            {
+                "message": "Break in successfully",
+                "status": "break_in",
+                "break_in": break_in_list,
+                "break_out": break_out_list
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+    
+class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = AttendanceSerializer
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = AttendanceFilter
+    ordering_fields = ["date", "punch_in", "punch_out"]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.groups.filter(name__in=["HR", "Manager"]).exists():
+            return Attendance.objects.all()
+        return Attendance.objects.filter(employee=user)
+
+
+@api_view(["POST"])
+def age_calculator(request):
+    dob_string = request.data.get("date_of_birth")
+    calculate_on_string = request.data.get("calculate_on")
+
+    if not dob_string:
+        return Response(
+            {"message": "date_of_birth is required (format: YYYY-MM-DD)"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not calculate_on_string:
+        return Response(
+            {"message": "calculate_on is required (format: YYYY-MM-DD)"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        dob = datetime.strptime(dob_string, "%Y-%m-%d").date()
+        calculate_on = datetime.strptime(
+            calculate_on_string, "%Y-%m-%d"
+        ).date()
+    except ValueError:
+        return Response(
+            {"message": "Invalid date format. Use YYYY-MM-DD"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if dob > calculate_on:
+        return Response(
+            {"message": "Date of birth cannot be after calculation date"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    result = calculate_age_details(dob, calculate_on)
+
+    return Response(
+        result,
+        status=status.HTTP_200_OK
+    )

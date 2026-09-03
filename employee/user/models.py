@@ -39,6 +39,7 @@ class Employee(AbstractBaseUser, PermissionsMixin):
     designation = models.CharField(max_length=100, blank=True, null=True)
     salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     joining_date = models.DateField(blank=True, null=True)
+    profile_picture = models.ImageField(upload_to="profile_pics/", blank=True, null=True)
     failed_login_attempts = models.PositiveIntegerField(default=0)
     locked_until = models.DateTimeField(null=True, blank=True)
 
@@ -66,3 +67,19 @@ class EmailOTP(models.Model):
     @staticmethod
     def generate_otp():
         return str(random.randint(100000, 999999))
+
+from django.utils import timezone
+
+
+class Attendance(models.Model):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    date = models.DateField(default=timezone.now)
+    punch_in = models.DateTimeField()
+    punch_out = models.DateTimeField(null=True, blank=True)
+    auto_punched_out = models.BooleanField(default=False)
+    total_timing = models.DurationField(null=True, blank=True)
+    break_in = models.JSONField(default=list, blank=True)
+    break_out = models.JSONField(default=list, blank=True)
+    
+    def __str__(self):
+        return f"{self.employee.name} - {self.date}"

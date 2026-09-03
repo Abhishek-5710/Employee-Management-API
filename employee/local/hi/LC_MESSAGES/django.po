@@ -1,0 +1,13 @@
+msgid ""
+msgstr ""
+"Language: hi\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Employee registered successfully"
+msgstr "कर्मचारी सफलतापूर्वक पंजीकृत हुआ"
+
+msgid "Login successful"
+msgstr "लॉगिन सफल रहा"
+
+msgid "Invalid username or password"
+msgstr "यूज़रनेम या पासवर्ड गलत है"
